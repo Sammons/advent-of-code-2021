@@ -1,92 +1,28 @@
-use std::{collections::HashSet, borrow::BorrowMut};
+use std::{
+    borrow::BorrowMut,
+    collections::{HashMap, HashSet},
+};
 
-struct Line {
-    samples: Vec<String>,
-    ciphers: Vec<String>,
-}
 struct Input {
-    lines: Vec<Line>,
+    grid: Vec<Vec<i8>>,
 }
 
 impl Input {
     fn from_file(path: &str) -> Result<Input, String> {
         let res = std::fs::read_to_string(path);
         let file_str = res.map_err(|e| e.to_string())?;
-        let line_by_line = file_str.split('\n');
-        let lines = line_by_line
-            .map(|file_line| {
-                let left_right_split: Vec<&str> = file_line.split('|').collect();
-                let left = left_right_split[0];
-                let right = left_right_split[1];
-                let mut samples: Vec<String> = left
+        let grid = file_str
+            .split("\n")
+            .map(|line| {
+                let vec: Vec<i8> = line
                     .trim()
-                    .split_ascii_whitespace()
-                    .map(|s| {
-                      let mut v = vec![];
-                      for c in s.chars() {
-                        v.push(c);
-                      }
-                      v.sort();
-                      v.iter().collect()
-                    })
+                    .chars()
+                    .map(|c| (c as i8 - '0' as i8) as i8)
                     .collect();
-                samples.sort_by(|a,b| a.len().cmp(&b.len()));
-                let ciphers = right
-                    .trim()
-                    .split_ascii_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-                Line { samples, ciphers }
+                vec
             })
             .collect();
-        Ok(Input { lines })
-    }
-}
-
-struct Combo {
-    seq: Vec<char>,
-    remaining: Vec<char>,
-}
-
-fn all_combinations_of_a(chars: Vec<char>) -> Vec<Vec<char>> {
-    let mut combos: Vec<String> = vec!["".to_string()];
-    let mut observed = HashSet::new();
-    while combos.len() > 0 {
-        match combos.pop() {
-            None => (),
-            Some(combo) => {
-                for c in &chars {
-                    let new_s = combo.to_string() + &c.to_string();
-                    if !observed.contains(&new_s) {
-                        if new_s.len() < chars.len() {
-                            combos.push(new_s.clone());
-                        }
-                        observed.insert(new_s);
-                    }
-                }
-            }
-        }
-    }
-    observed
-        .iter()
-        .filter(|v| v.len() == chars.len())
-        .map(|s| s.chars().collect())
-        .collect()
-}
-
-fn all_combinations_of_b(chars: &Vec<char>) -> Vec<Vec<char>> {
-    let mut combos: Vec<Vec<char>> = vec![];
-    for c in chars {
-        let mut remaining = chars.clone();
-        remaining.retain(|c2| c2 != c);
-        for combo in all_combinations_of_b(&remaining) {
-            combos.push([[*c].to_vec(), combo].concat());
-        }
-    }
-    if combos.len() > 0 {
-        combos
-    } else {
-        vec![vec![]]
+        Ok(Input { grid })
     }
 }
 
@@ -94,94 +30,138 @@ fn main_pt1() {
     let input_res = Input::from_file("./src/input.txt");
     match input_res {
         Ok(input) => {
-            let mut count = 0;
-            for line in input.lines {
-                for word in line.ciphers {
-                    if [2, 3, 4, 7].contains(&word.len()) {
-                        count += 1;
+            let mut sum: i32 = 0;
+            for y in 0..input.grid.len() {
+                for x in 0..input.grid[y].len() {
+                    if is_low_point(&input, &x, &y) {
+                        sum += 1 + input.grid[y][x] as i32;
                     }
                 }
             }
-            println!("{}", count);
+            println!("{}", sum)
         }
         Err(e) => println!("{}", e),
     }
 }
 
-fn try_decode(
-  nums: &[String; 10],
-  ciphers: &Vec<String>,
-  key: &Vec<char>
-) -> Option<Vec<usize>> {
-  let n: Vec<char> ="abcdefg".chars().collect();
-  let mut decoded_values = vec![];
-  for word in ciphers {
-    let mut decoded_chars: Vec<char> = word.chars()
-      .map(|c| {
-        for i in 0..n.len() {
-          if key[i] == c {
-            return n[i];
-          }
-        }
-        panic!("invalid key");
-      }).collect();
-    decoded_chars.sort();
-    let decoded: String = decoded_chars.iter().collect();
-    for (idx, n) in nums.iter().enumerate() {
-      if *n == decoded {
-        decoded_values.push(idx);
+fn get_adjacencies(input: &Input, _x: &usize, _y: &usize) -> Vec<((usize, usize),i8)> {
+    let x = *_x;
+    let y = *_y;
+    let get_y_x = |y, x| -> Option<i8> {
+        input
+            .grid
+            .get(y)
+            .map(|g: &Vec<i8>| g.get(x))
+            .flatten()
+            .map(|v: &i8| v.clone())
+    };
+    let mut adjacent_neighbors: Vec<((usize, usize),i8)> = vec![];
+    let adjacencies = [
+        y.checked_add(1).map(|v| ((x, v), get_y_x(v, x))),
+        y.checked_sub(1).map(|v| ((x, v), get_y_x(v, x))),
+        x.checked_add(1).map(|v| ((v, y), get_y_x(y, v))),
+        x.checked_sub(1).map(|v| ((v, y), get_y_x(y, v))),
+    ];
+    for adj in adjacencies {
+      if let Some((coords,Some(height))) = adj {
+        adjacent_neighbors.push((coords, height));
       }
     }
-  }
-  if decoded_values.len() == ciphers.len() {
-    return Some(decoded_values);
-  } else {
-    None
-  }
+    adjacent_neighbors
+}
+
+fn is_low_point(input: &Input, _x: &usize, _y: &usize) -> bool {
+    let x = *_x;
+    let y = *_y;
+    let cur_value = input.grid[y][x];
+    let adjacencies = get_adjacencies(input, _x, _y);
+    for (_, height) in adjacencies {
+        if height <= cur_value {
+            return false;
+        }
+    }
+    return true;
+}
+
+struct Basin {
+    id: i32,
+    size: usize,
+}
+struct BasinWatcher {
+    basins: HashMap<i32, usize>,
+    basin_members: Vec<Vec<Option<i32>>>,
+}
+
+impl BasinWatcher {
+    fn from_input(input: &Input) -> BasinWatcher {
+        let y_len = input.grid.len();
+        let x_len = input.grid[0].len();
+        let basin_members = (0..y_len)
+            .map(|_| {
+                return (0..x_len)
+                    .map(|_| None as Option<i32>)
+                    .collect::<Vec<Option<i32>>>();
+            })
+            .collect();
+        BasinWatcher {
+            basin_members,
+            basins: HashMap::new(),
+        }
+    }
+    fn add_member_to_basin(&mut self, basin_id: i32, x: usize, y: usize) {
+      self.basin_members[y][x] = Some(basin_id);
+      if self.basins.contains_key(&basin_id) {
+        let v = self.basins.get_mut(&basin_id).unwrap();
+        *v += 1;
+      } else {
+        self.basins.insert(basin_id, 1);
+      }
+    }
+    fn pour_paint(&mut self, input: &Input, x: usize, y: usize) {
+      let neighbors = get_adjacencies(input, &x, &y);
+      // assume current x,y is painted since we start with sinks
+      let cur_basin = self.basin_members[y][x].unwrap();
+      let cur_height = input.grid[y][x];
+      for ((nx,ny), height) in neighbors {
+        if height >= cur_height && height != 9 && self.basin_members[ny][nx].is_none() {
+          self.add_member_to_basin(cur_basin, nx, ny);
+          self.pour_paint(input, nx, ny);
+        }
+      }
+    }
+    fn detect_basins(&mut self, input: &Input) -> Vec<(&i32, &usize)> {
+        let mut sources: Vec<(usize, usize)> = vec![];
+        let mut basin_ids = 0;
+        for y in 0..input.grid.len() {
+            for x in 0..input.grid[y].len() {
+                if is_low_point(&input, &x, &y) {
+                    sources.push((x, y));
+                    basin_ids += 1;
+                    self.add_member_to_basin(basin_ids, x, y);
+                }
+            }
+        }
+        println!("{} sources detected", sources.len());
+        for (x, y) in sources {
+            self.pour_paint(input, x, y);
+        }
+        self.basins.iter().map(|(k,v)| (k,v)).collect()
+    }
 }
 
 fn main() {
-    let nums = [
-        "abcefg".to_string(),
-        "cf".to_string(),
-        "acdeg".to_string(),
-        "acdfg".to_string(),
-        "bcdf".to_string(),
-        "abdfg".to_string(),
-        "abdefg".to_string(),
-        "acf".to_string(),
-        "abcdefg".to_string(),
-        "abcdfg".to_string(),
-    ];
-    let combos = all_combinations_of_b(&['a', 'b', 'c', 'd', 'e', 'f', 'g'].to_vec());
-    println!("combo len {}", combos.len());
     let input_res = Input::from_file("./src/input.txt");
-    let combos = all_combinations_of_b(&"abcdefg".chars().collect());
     match input_res {
         Ok(input) => {
-            let mut count = 0;
-            for line in input.lines.iter() {
-              println!("Evaluating {}", line.ciphers.join(" "));
-              for key in &combos {
-                match try_decode(&nums, &line.samples, key) {
-                  Some(_) => {
-                    let decoded_values_digits = try_decode(&nums, &line.ciphers, key);
-                    let numeric = decoded_values_digits.iter()
-                      .flatten()
-                      .map(|d| d.to_string())
-                      .collect::<String>();
-                    match numeric.parse::<i32>() {
-                      Ok(v) => count += v,
-                      Err(e) => {
-                        println!("{}", e.to_string());
-                      }
-                    }
-                  },
-                  None => ()
-                }
-              }
+            let mut bw = BasinWatcher::from_input(&input);
+            let mut basins = bw.detect_basins(&input);
+            basins.sort_by(|b,a| a.1.cmp(b.1));
+            let mut mult = 1;
+            for b in basins.iter().take(3) {
+              println!("{:?}", b);
+              mult *= b.1;
             }
-            println!("{}", count);
+            println!("{:?}", mult);
         }
         Err(e) => println!("{}", e),
     }
