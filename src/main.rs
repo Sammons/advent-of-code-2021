@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, LinkedList},
-    iter::FromFn,
+    iter::FromFn, ops::DerefMut,
 };
 
 #[derive(Debug)]
@@ -160,8 +160,82 @@ impl Input {
         }
         let max = frequencies.values().max().unwrap();
         let min = frequencies.values().min().unwrap();
-        println!("{:?}", frequencies);
         println!("{} - {} = {}", max, min, max - min);
+        println!("{:?}", frequencies);
+    }
+    fn discover_recurse(
+        &self,
+        polymer: &str,
+        depth: usize,
+        global_occurrences: &mut HashMap<char, usize>,
+        memo: &mut HashMap<(String, usize), Vec<(char, usize)>>
+    ) {
+        let mut apply_freq = |freq: &Vec<(char, usize)>| {
+            for (char, count) in freq {
+                match global_occurrences.get_mut(char) {
+                    Some(char_count) => {
+                        *char_count += count;
+                    },
+                    None => {
+                        global_occurrences.insert(*char, *count);
+                    }
+                }
+            }
+        };
+        if memo.contains_key(&(polymer.to_string(), depth)) {
+           let freq = memo.get(&(polymer.to_string(), depth)).unwrap();
+           apply_freq(freq);
+           return;
+        }
+        if depth == 0 {
+            return;
+        }
+        let mut occurrences = HashMap::new();
+        for idx in 0..polymer.len() - 1 {
+            let pair: &str = &polymer[idx..idx + 2];
+            let c1 = pair.as_bytes()[0] as char;
+            let c2 = pair.as_bytes()[1] as char;
+            if self.pairs.contains_key(&(c1, c2)) {
+                let insertion = self.pairs.get(&(c1, c2));
+                if let Some(insert_char) = insertion {
+                    match occurrences.get_mut(insert_char) {
+                        Some(count) => {
+                            *count += 1;
+                        }
+                        None => {
+                            occurrences.insert(*insert_char, 1);
+                        }
+                    }
+                    let left = c1.to_string() + &insert_char.to_string();
+                    let right = insert_char.to_string() + &c2.to_string();
+                    self.discover_recurse(&left, depth - 1, &mut occurrences, memo);
+                    self.discover_recurse(&right, depth - 1, &mut occurrences, memo);
+                }
+            }
+        }
+        let memo_val: Vec<(char, usize)> = occurrences.iter().map(|(c,s)| (*c, *s)).collect();
+        apply_freq(&memo_val);
+        memo.insert((polymer.to_string(), depth), memo_val);
+    }
+    fn discover(&self, depth: usize) {
+        let mut occurrences = HashMap::new();
+        let mut memo = HashMap::new();
+        let poly_s = self.poly_to_s();
+        for c in poly_s.chars() {
+            match occurrences.get_mut(&c) {
+                Some(count) => {
+                    *count += 1;
+                }
+                None => {
+                    occurrences.insert(c, 1);
+                }
+            }
+        }
+        self.discover_recurse(&poly_s, depth, &mut occurrences, &mut memo);
+        let max = occurrences.values().max().unwrap();
+        let min = occurrences.values().min().unwrap();
+        println!("{} - {} = {}", max, min, max - min);
+        println!("{:?}", occurrences);
     }
     fn tick(&mut self) {
         let mut cur = self.polymer.first;
@@ -184,27 +258,24 @@ impl Input {
             cur = next;
             next
         });
-        for _ in list {};
+        for _ in list {}
     }
 }
 
-// n=11 {'C': 480, 'H': 357, 'B': 3539, 'N': 1769}
-// n=12 {'H': 506, 'C': 924, 'N': 3603, 'B': 7256}
-// n=13 {'C': 1509, 'H': 1083, 'B': 14656, 'N': 7329}
-// n=14 {'H': 1585, 'N': 14860, 'C': 2862, 'B': 29846}
 fn main() {
-    let input_res = Input::from_file("./src/sample.txt");
+    let input_res = Input::from_file("./src/input.txt");
     match input_res {
         Ok(mut input) => {
             input.print();
-            let n = 14;
-            for i in 0..n {
-                input.tick();
-                // println!("{} ->", i + 1);
-                // input.print();
-                println!("{}", i);
-            }
-            input.tally();
+            // let n = 14;
+            // for i in 0..n {
+            //     input.tick();
+            //     // println!("{} ->", i + 1);
+            //     // input.print();
+            //     println!("{}", i);
+            // }
+            // input.tally();
+            input.discover(40);
             println!("Done");
         }
         Err(e) => println!("{}", e),
