@@ -1,169 +1,325 @@
 use std::{
     collections::{HashMap, HashSet},
+    convert,
     iter::FromFn,
     ops::DerefMut,
 };
 
-struct Problem {
-    grid: Vec<Vec<u8>>,
+// 3 bits version
+// 3 bits type id
+
+// when type id = 4
+// 5 bit chunks, leading with 1 until last chunk which leads with 0
+
+// otherwise type id is operator
+// bit 1 is length type
+// 0 = 15 bits are the length of all sub packets
+// 1 = 11 bits are the number of sub
+
+struct Blob {
+    grid: Vec<bool>, // would be u4
 }
 
-fn add_i32_to_usize(a: usize, b: i32) -> Option<usize> {
-    if b < 0 {
-        let _b = (b * -1) as usize;
-        if _b > a {
-            None
-        } else {
-            Some(a - _b)
+#[derive(Debug)]
+struct ContentPacketValue {
+    kind: usize,
+    version: usize,
+    content: Vec<usize>,
+}
+
+fn num_to_bits(_n: u8) ->Vec<bool> {
+    let mut n = _n;
+    let mut bits: Vec<bool> = vec![];
+    for _ in 0..4 {
+        let v: bool = if (1 & n) == 1 { true } else { false };
+        bits.push(v);
+        n = n >> 1;
+    }
+    bits.reverse();
+    bits
+}
+
+
+
+#[derive(Debug)]
+struct OperationPacketValue {
+    kind: usize,
+    version: usize,
+    packets: Vec<Packet>,
+}
+
+#[derive(Debug)]
+enum Packet {
+    ContentPacket(ContentPacketValue),
+    OperationPacket(OperationPacketValue),
+}
+
+impl ContentPacketValue {
+    fn get_value(&self) -> i64 {
+        let mut v: i64 = 0;
+        for d in &self.content {
+            v *= 10;
+            v += *d as i64;
         }
-    } else {
-        let _b = b as usize;
-        Some(a + _b)
+        v
     }
 }
 
-// inclusive to zero
-fn bounded_tuple_add(
-    a: (usize, usize),
-    b: (i32, i32),
-    exclusive_bound: (usize, usize),
-) -> Option<(usize, usize)> {
-    let x = add_i32_to_usize(a.0, b.0).filter(|v| v < &exclusive_bound.0);
-    let y = add_i32_to_usize(a.1, b.1).filter(|v| v < &exclusive_bound.1);
-    if x.is_some() && y.is_some() {
-        Some((x.unwrap(), y.unwrap()))
-    } else {
-        None
-    }
-}
-
-fn adjacent_coords(grid: &Vec<Vec<u8>>, x: usize, y: usize) -> Vec<(usize, usize)> {
-    let mut adjacent_neighbors: Vec<(usize, usize)> = vec![];
-    let width = grid[0].len();
-    let height = grid.len();
-    let adjacencies = [
-        bounded_tuple_add((x, y), (1, 0), (width, height)),
-        bounded_tuple_add((x, y), (-1, 0), (width, height)),
-        bounded_tuple_add((x, y), (0, 1), (width, height)),
-        bounded_tuple_add((x, y), (0, -1), (width, height)),
-    ];
-    for adj in adjacencies {
-        if adj.is_some() {
-            adjacent_neighbors.push(adj.unwrap())
+impl OperationPacketValue {
+    fn evaluate(&self) -> i64 {
+        let sum = || {
+            let mut s = 0;
+            for p in &self.packets {
+                s += p.evaluate();
+            }
+            s
+        };
+        let product = || {
+            let mut s = 1;
+            for p in &self.packets {
+                s *= p.evaluate();
+            }
+            s
+        };
+        let min = || {
+            let mut min = self.packets[0].evaluate();
+            for p in self.packets.iter().skip(1) {
+                let e = p.evaluate();
+                if min > e {
+                    min = e;
+                }
+            }
+            min
+        };
+        let max = || {
+            let mut max = self.packets[0].evaluate();
+            for p in self.packets.iter().skip(1) {
+                let e = p.evaluate();
+                if max < e {
+                    max = e;
+                }
+            }
+            max
+        };
+        let gt = || {
+            let first = self.packets[0].evaluate();
+            let second = self.packets[1].evaluate();
+            if first > second {
+                1
+            } else {
+                0
+            }
+        };
+        let lt = || {
+            let first = self.packets[0].evaluate();
+            let second = self.packets[1].evaluate();
+            if first < second {
+                1
+            } else {
+                0
+            }
+        };
+        let eq = || {
+            let first = self.packets[0].evaluate();
+            let second = self.packets[1].evaluate();
+            if first == second {
+                1
+            } else {
+                0
+            }
+        };
+        match self.kind {
+            0 => sum(),
+            1 => product(),
+            2 => min(),
+            3 => max(),
+            5 => gt(),
+            6 => lt(),
+            7 => eq(),
+            _ => panic!("invalid kind")
         }
     }
-    adjacent_neighbors
 }
 
-struct Path {
-    // nodes: HashSet<(usize, usize)>,
-    risk: usize,
-    cur_coord: (usize, usize),
+impl Packet {
+    fn evaluate(&self) -> i64 {
+        match self {
+            Packet::ContentPacket(value) => {
+                value.get_value()
+            },
+            Packet::OperationPacket(value) => {
+                value.evaluate()
+            }
+        }
+    }
 }
 
-impl Problem {
-    fn from_file(path: &str) -> Result<Problem, String> {
+impl Blob {
+    fn from_file(path: &str) -> Result<Blob, String> {
         let res = std::fs::read_to_string(path);
         let file_str = res.map_err(|e| e.to_string())?;
         let lines: Vec<String> = file_str
             .split("\n")
             .map(|line| line.trim().to_string())
             .collect();
-        let mut grid = vec![];
-        for dy in 0..5 {
-            for y in 0..lines.len() {
-                let line = &lines[y];
-                let mut row = vec![];
-                for dx in 0..5 {
-                    for char in line.chars() {
-                        let v: u8 = char.to_string().parse::<u8>().unwrap() + dx as u8 + dy as u8;
-                        if v > 9 {
-                            row.push(v - 9);
-                        } else {
-                            row.push(v);
-                        }
-                    }
-                }
-                grid.push(row);
-            }
-        }
-        Ok(Problem { grid })
+        let decode_hex = |c: char| match c {
+            '0' => 0,
+            '1' => 1,
+            '2' => 2,
+            '3' => 3,
+            '4' => 4,
+            '5' => 5,
+            '6' => 6,
+            '7' => 7,
+            '8' => 8,
+            '9' => 9,
+            'A' => 10,
+            'B' => 11,
+            'C' => 12,
+            'D' => 13,
+            'E' => 14,
+            'F' => 15,
+            _ => panic!("invalid hex char"),
+        };
+        
+        // println!("bits {:?}", num_to_bits(11));
+        let grid = lines[0]
+            .chars()
+            .flat_map(|c| num_to_bits(decode_hex(c)))
+            .collect();
+        Ok(Blob { grid })
     }
     fn print(&self) {
         println!("");
     }
 
-    fn traverse_to_result(
-        &self,
-        start_coord: (usize, usize),
-        end_coord: (usize, usize),
-    ) -> Option<usize> {
-        let mut start_list = HashSet::new();
-        start_list.insert(start_coord);
-        let mut queue = vec![Path {
-            cur_coord: start_coord,
-            risk: 0
-            // nodes: start_list,
-        }];
-        let mut best_path_to_coord: HashMap<(usize, usize), usize> = HashMap::new();
-        while queue.len() > 0 {
+    // 3 bits version
+    // 3 bits type id
 
-            let next = queue.pop().unwrap();
-            let (x, y) = next.cur_coord;
-            let mut neighbors = adjacent_coords(&self.grid, x, y);
-            neighbors.sort_by(|(x2, y2), (x1, y1)| {
-                let a = (x2 + y2) as i64;
-                let b = (x1 + y1) as i64;
-                a.cmp(&b)
-            });
-            // println!("{:?}", neighbors);
-            for n in neighbors {
-                let (nx, ny) = n;
-                let new_risk = next.risk + self.grid[ny][nx] as usize;
-                if let Some(best) = best_path_to_coord.get(&n) {
-                    if best <= &new_risk {
-                        continue;
+    // when type id = 4
+    // 5 bit chunks, leading with 1 until last chunk which leads with 0
+
+    // otherwise type id is operator
+    // bit 1 is length type
+    // 0 = 15 bits are the length of all sub packets
+    // 1 = 11 bits are the number of sub
+    fn parse_packets(&self) -> (usize, Vec<Packet>) {
+        let mut packets = vec![];
+        let mut offset: usize = 0;
+        let mut version_sum = 0;
+        while self.grid.len() - offset > 11 {
+            let (new_offset, vs, packet) = self.parse_one_packet(offset, self.grid.len());
+            version_sum += vs;
+            offset = new_offset;
+            packets.push(packet);
+        }
+        (version_sum, packets)
+    }
+    fn convert_bits_into_num(bits: &Vec<bool>, start: usize, end: usize) -> usize {
+        let mut num: usize = 0;
+        for idx in start..end {
+            let v: usize = if bits[idx] { 1 } else { 0 };
+            num = num | v;
+            num = num << 1
+        }
+        num >>= 1;
+        // print!("-> {}\n", num);
+        num
+    }
+    fn parse_one_packet(&self, start_idx: usize, boundary: usize) -> (usize, usize, Packet) {
+        let version = Blob::convert_bits_into_num(&self.grid, start_idx, start_idx + 3);
+        let kind = Blob::convert_bits_into_num(&self.grid, start_idx + 3, start_idx + 6);
+        let mut offset = start_idx + 6;
+        if kind == 4 {
+            // content
+            let mut content = vec![];
+            let mut bit_segments: Vec<bool> = vec![];
+            loop {
+                let leading_bit = self.grid[offset];
+                // content.push(Blob::convert_bits_into_num(offset + 1, offset + 5));
+                for i in offset + 1 .. offset + 5 {
+                    bit_segments.push(self.grid[i]);
+                }
+                offset += 5;
+                if leading_bit == false {
+                    break;
+                }
+            }
+            content.push(Blob::convert_bits_into_num(&bit_segments, 0, bit_segments.len()));
+            (
+                offset,
+                version,
+                Packet::ContentPacket(ContentPacketValue {
+                    content,
+                    kind: 4,
+                    version,
+                }),
+            )
+        } else {
+            // operator
+            let length_type = self.grid[offset];
+            offset += 1;
+            let mut sub_packets = vec![];
+            if length_type == true {
+                // 11 bits represent number of packets
+                let number_of_packets = Blob::convert_bits_into_num(&self.grid, offset, offset + 11);
+                offset += 11;
+                let mut version_sum = version;
+                for _ in 0..number_of_packets {
+                    let (new_offset, vs, packet) = self.parse_one_packet(offset, self.grid.len());
+                    version_sum += vs;
+                    sub_packets.push(packet);
+                    offset = new_offset;
+                }
+                (
+                    offset,
+                    version_sum,
+                    Packet::OperationPacket(OperationPacketValue {
+                        kind,
+                        version,
+                        packets: sub_packets,
+                    }),
+                )
+            } else {
+                // 15 bits represent size of sub-packets
+                let length_of_packets = Blob::convert_bits_into_num(&self.grid, offset, offset + 15);
+                offset += 15;
+                let boundary = offset + length_of_packets;
+                let mut version_sum = version;
+                while offset < boundary {
+                    let (new_offset, vs, packet) = self.parse_one_packet(offset, boundary);
+                    version_sum += vs;
+                    if new_offset <= boundary {
+                        sub_packets.push(packet);
+                        offset = new_offset;
+                    } else {
+                        panic!("not clear, prev {} new {}, boundary {}", offset, new_offset, boundary);
                     }
                 }
-                if let Some(best) = best_path_to_coord.get(&end_coord) {
-                    if best <= &new_risk {
-                        continue;
-                    }
-                }
-                let new_path = Path {
-                    risk: new_risk,
-                    cur_coord: n,
-                };
-                best_path_to_coord.insert(n, new_risk);
-                if n == end_coord {
-                    // println!("{}", new_risk);
-                    continue;
-                }
-                queue.push(new_path)
+                (
+                    offset,
+                    version_sum,
+                    Packet::OperationPacket(OperationPacketValue {
+                        kind,
+                        version,
+                        packets: sub_packets,
+                    }),
+                )
             }
         }
-        best_path_to_coord.get(&end_coord).map(|v| v.to_owned())
     }
 }
 
 fn main() {
-    let input_res = Problem::from_file("./src/input.txt");
+    let input_res = Blob::from_file("./src/input.txt");
     match input_res {
         Ok(mut input) => {
-            let risk =
-                input.traverse_to_result((0, 0), (input.grid[0].len() - 1, input.grid.len() - 1));
-            println!("{:?}", risk);
-            // for y in 0..input.grid.len() {
-            //     for x in 0..input.grid[y].len() {
-            //         if path_members.contains(&(x, y)) {
-            //             print!("{}", "*")
-            //         } else {
-            //             print!("{}", input.grid[y][x]);
-            //         }
-            //     }
-            //     print!("\n");
-            // }
-            // println!("Done {:?} {:?}", path_members);
+            let (version_sum, packets) = input.parse_packets();
+            let result = packets[0].evaluate();
+            println!("{}", version_sum);
+            // 8749379669
+            println!("{}", result);
+            // println!("{} top packets of kind {:?}", packets.len(), packets[0]);
         }
         Err(e) => println!("{}", e),
     }
