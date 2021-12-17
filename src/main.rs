@@ -1,326 +1,125 @@
 use std::{
     collections::{HashMap, HashSet},
-    convert,
     iter::FromFn,
-    ops::DerefMut,
+    ops::{DerefMut, Range, RangeBounds},
 };
 
-// 3 bits version
-// 3 bits type id
-
-// when type id = 4
-// 5 bit chunks, leading with 1 until last chunk which leads with 0
-
-// otherwise type id is operator
-// bit 1 is length type
-// 0 = 15 bits are the length of all sub packets
-// 1 = 11 bits are the number of sub
-
-struct Blob {
-    grid: Vec<bool>, // would be u4
-}
-
-#[derive(Debug)]
-struct ContentPacketValue {
-    kind: usize,
-    version: usize,
-    content: Vec<usize>,
-}
-
-fn num_to_bits(_n: u8) ->Vec<bool> {
-    let mut n = _n;
-    let mut bits: Vec<bool> = vec![];
-    for _ in 0..4 {
-        let v: bool = if (1 & n) == 1 { true } else { false };
-        bits.push(v);
-        n = n >> 1;
-    }
-    bits.reverse();
-    bits
+struct Problem {
+    target_area_min_x: i32,
+    target_area_max_x: i32,
+    target_area_min_y: i32,
+    target_area_max_y: i32
 }
 
 
-
-#[derive(Debug)]
-struct OperationPacketValue {
-    kind: usize,
-    version: usize,
-    packets: Vec<Packet>,
-}
-
-#[derive(Debug)]
-enum Packet {
-    ContentPacket(ContentPacketValue),
-    OperationPacket(OperationPacketValue),
-}
-
-impl ContentPacketValue {
-    fn get_value(&self) -> i64 {
-        let mut v: i64 = 0;
-        for d in &self.content {
-            v *= 10;
-            v += *d as i64;
-        }
-        v
-    }
-}
-
-impl OperationPacketValue {
-    fn evaluate(&self) -> i64 {
-        let sum = || {
-            let mut s = 0;
-            for p in &self.packets {
-                s += p.evaluate();
-            }
-            s
-        };
-        let product = || {
-            let mut s = 1;
-            for p in &self.packets {
-                s *= p.evaluate();
-            }
-            s
-        };
-        let min = || {
-            let mut min = self.packets[0].evaluate();
-            for p in self.packets.iter().skip(1) {
-                let e = p.evaluate();
-                if min > e {
-                    min = e;
-                }
-            }
-            min
-        };
-        let max = || {
-            let mut max = self.packets[0].evaluate();
-            for p in self.packets.iter().skip(1) {
-                let e = p.evaluate();
-                if max < e {
-                    max = e;
-                }
-            }
-            max
-        };
-        let gt = || {
-            let first = self.packets[0].evaluate();
-            let second = self.packets[1].evaluate();
-            if first > second {
-                1
-            } else {
-                0
-            }
-        };
-        let lt = || {
-            let first = self.packets[0].evaluate();
-            let second = self.packets[1].evaluate();
-            if first < second {
-                1
-            } else {
-                0
-            }
-        };
-        let eq = || {
-            let first = self.packets[0].evaluate();
-            let second = self.packets[1].evaluate();
-            if first == second {
-                1
-            } else {
-                0
-            }
-        };
-        match self.kind {
-            0 => sum(),
-            1 => product(),
-            2 => min(),
-            3 => max(),
-            5 => gt(),
-            6 => lt(),
-            7 => eq(),
-            _ => panic!("invalid kind")
-        }
-    }
-}
-
-impl Packet {
-    fn evaluate(&self) -> i64 {
-        match self {
-            Packet::ContentPacket(value) => {
-                value.get_value()
-            },
-            Packet::OperationPacket(value) => {
-                value.evaluate()
-            }
-        }
-    }
-}
-
-impl Blob {
-    fn from_file(path: &str) -> Result<Blob, String> {
-        let res = std::fs::read_to_string(path);
-        let file_str = res.map_err(|e| e.to_string())?;
-        let lines: Vec<String> = file_str
-            .split("\n")
-            .map(|line| line.trim().to_string())
-            .collect();
-        let decode_hex = |c: char| match c {
-            '0' => 0,
-            '1' => 1,
-            '2' => 2,
-            '3' => 3,
-            '4' => 4,
-            '5' => 5,
-            '6' => 6,
-            '7' => 7,
-            '8' => 8,
-            '9' => 9,
-            'A' => 10,
-            'B' => 11,
-            'C' => 12,
-            'D' => 13,
-            'E' => 14,
-            'F' => 15,
-            _ => panic!("invalid hex char"),
-        };
-        
-        // println!("bits {:?}", num_to_bits(11));
-        let grid = lines[0]
-            .chars()
-            .flat_map(|c| num_to_bits(decode_hex(c)))
-            .collect();
-        Ok(Blob { grid })
-    }
+impl Problem {
     fn print(&self) {
         println!("");
     }
-
-    // 3 bits version
-    // 3 bits type id
-
-    // when type id = 4
-    // 5 bit chunks, leading with 1 until last chunk which leads with 0
-
-    // otherwise type id is operator
-    // bit 1 is length type
-    // 0 = 15 bits are the length of all sub packets
-    // 1 = 11 bits are the number of sub
-    fn parse_packets(&self) -> (usize, Vec<Packet>) {
-        let mut packets = vec![];
-        let mut offset: usize = 0;
-        let mut version_sum = 0;
-        while self.grid.len() - offset > 11 {
-            let (new_offset, vs, packet) = self.parse_one_packet(offset, self.grid.len());
-            version_sum += vs;
-            offset = new_offset;
-            packets.push(packet);
-        }
-        (version_sum, packets)
+    fn detect_result_pos(&self, x: &i32) -> i32 {
+        (x * (x + 1)) / 2
     }
-    fn convert_bits_into_num(bits: &Vec<bool>, start: usize, end: usize) -> usize {
-        let mut num: usize = 0;
-        for idx in start..end {
-            let v: usize = if bits[idx] { 1 } else { 0 };
-            num = num | v;
-            num = num << 1
+    fn detect_velocity_options_hitting_range(&self, range: Range<i32>) -> Vec<i32> {
+        let mut options = vec![];
+        for possibility in 1..range.end {
+            let result_position = self.detect_result_pos(&possibility);
+            if range.contains(&result_position) {
+                options.push(possibility);
+            }
         }
-        num >>= 1;
-        // print!("-> {}\n", num);
-        num
+        options
     }
-    fn parse_one_packet(&self, start_idx: usize, boundary: usize) -> (usize, usize, Packet) {
-        let version = Blob::convert_bits_into_num(&self.grid, start_idx, start_idx + 3);
-        let kind = Blob::convert_bits_into_num(&self.grid, start_idx + 3, start_idx + 6);
-        let mut offset = start_idx + 6;
-        if kind == 4 {
-            // content
-            let mut content = vec![];
-            let mut bit_segments: Vec<bool> = vec![];
-            loop {
-                let leading_bit = self.grid[offset];
-                // content.push(Blob::convert_bits_into_num(offset + 1, offset + 5));
-                for i in offset + 1 .. offset + 5 {
-                    bit_segments.push(self.grid[i]);
+    fn detect_best_y_height_for_x(&self, x: &i32) -> i32 {
+        let mut highest_pos = 0;
+        let mut valid_y_values = vec![];
+        for yv in 1..x*100 {
+            let mut y = 0;
+            let mut dv = yv;
+            let mut cur_highest_pos = 0;
+            let mut is_valid = false;
+            while y >= self.target_area_min_y {
+                y = y + dv;
+                if y > cur_highest_pos {
+                    cur_highest_pos = y
                 }
-                offset += 5;
-                if leading_bit == false {
+                if y >= self.target_area_min_y && y <= self.target_area_max_y {
+                    is_valid = true;
                     break;
                 }
+                dv -= 1;
             }
-            content.push(Blob::convert_bits_into_num(&bit_segments, 0, bit_segments.len()));
-            (
-                offset,
-                version,
-                Packet::ContentPacket(ContentPacketValue {
-                    content,
-                    kind: 4,
-                    version,
-                }),
-            )
-        } else {
-            // operator
-            let length_type = self.grid[offset];
-            offset += 1;
-            let mut sub_packets = vec![];
-            if length_type == true {
-                // 11 bits represent number of packets
-                let number_of_packets = Blob::convert_bits_into_num(&self.grid, offset, offset + 11);
-                offset += 11;
-                let mut version_sum = version;
-                for _ in 0..number_of_packets {
-                    let (new_offset, vs, packet) = self.parse_one_packet(offset, self.grid.len());
-                    version_sum += vs;
-                    sub_packets.push(packet);
-                    offset = new_offset;
-                }
-                (
-                    offset,
-                    version_sum,
-                    Packet::OperationPacket(OperationPacketValue {
-                        kind,
-                        version,
-                        packets: sub_packets,
-                    }),
-                )
-            } else {
-                // 15 bits represent size of sub-packets
-                let length_of_packets = Blob::convert_bits_into_num(&self.grid, offset, offset + 15);
-                offset += 15;
-                let boundary = offset + length_of_packets;
-                let mut version_sum = version;
-                while offset < boundary {
-                    let (new_offset, vs, packet) = self.parse_one_packet(offset, boundary);
-                    version_sum += vs;
-                    if new_offset <= boundary {
-                        sub_packets.push(packet);
-                        offset = new_offset;
-                    } else {
-                        panic!("not clear, prev {} new {}, boundary {}", offset, new_offset, boundary);
-                    }
-                }
-                (
-                    offset,
-                    version_sum,
-                    Packet::OperationPacket(OperationPacketValue {
-                        kind,
-                        version,
-                        packets: sub_packets,
-                    }),
-                )
+            if is_valid {
+                valid_y_values.push(yv);
+            }
+            if is_valid && cur_highest_pos > highest_pos {
+                highest_pos = cur_highest_pos;
             }
         }
+        highest_pos
+    }
+    fn is_valid_combo(&self, x: &i32, y: &i32) -> bool {
+        let mut xp = 0;
+        let mut yp = 0;
+        let mut dx = x.clone();
+        let mut dy = y.clone();
+        while xp < self.target_area_max_x + 1 && yp >= self.target_area_min_y {
+            xp += dx;
+            yp += dy;
+            if dx > 0 {
+                dx -= 1;
+            }
+            dy -= 1;
+            if xp >= self.target_area_min_x && xp <= self.target_area_max_x &&
+                yp >= self.target_area_min_y && yp <= self.target_area_max_y {
+                    return true;
+                }
+        }
+        false
+    }
+    fn best_height(&self) {
+        let x_options = self.detect_velocity_options_hitting_range(
+            self.target_area_min_x..self.target_area_max_x + 1
+        );
+        let min_x_option = x_options.iter().min().unwrap();
+        let y_options: Vec<i32> = x_options.iter().map(|x| {
+            self.detect_best_y_height_for_x(x)
+        }).collect();
+        println!("{:?}", y_options);
+        
+        // brute out all valid combos
+        let mut count = 0;
+        for x in 1..self.target_area_max_x + 1 {
+            let final_x = self.detect_result_pos(&x);
+            if final_x < self.target_area_min_x {
+                continue;
+            }
+            for y in -600..600 {
+                if self.is_valid_combo(&x, &y) {
+                    count += 1
+                }
+            }
+        };
+        println!("{}", count);
+
     }
 }
 
 fn main() {
-    let input_res = Blob::from_file("./src/input.txt");
-    match input_res {
-        Ok(mut input) => {
-            let (version_sum, packets) = input.parse_packets();
-            let result = packets[0].evaluate();
-            println!("{}", version_sum);
-            // 8749379669
-            println!("{}", result);
-            // println!("{} top packets of kind {:?}", packets.len(), packets[0]);
-        }
-        Err(e) => println!("{}", e),
-    }
+    let input_res = Problem {
+        // x=57..116, y=-198..-148
+        // not 4753
+        target_area_min_x: 57,
+        target_area_max_x: 116,
+        target_area_min_y: -198,
+        target_area_max_y: -148
+        // sample x=20..30, y=-10..-5
+        // 6,9 -> 45
+        // 6 + 5 + 4 + 3 + 2 + 1
+        // target_area_min_x: 20,
+        // target_area_max_x: 30,
+        // target_area_min_y: -10,
+        // target_area_max_y: -5
+    };
+    input_res.best_height();
+    // println!("{}", input_res.best_height());
 }
