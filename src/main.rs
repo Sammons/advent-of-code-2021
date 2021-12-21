@@ -1,325 +1,117 @@
-// 3 bits version
-// 3 bits type id
+use std::{collections::{HashMap, HashSet}, hash::Hash, ops::Sub};
 
-// when type id = 4
-// 5 bit chunks, leading with 1 until last chunk which leads with 0
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum O {
+    _1,
+    _2,
+    _3,
+    _4,
+    _5,
+    _6,
+    _7,
+    _8,
+    _9,
+    _10,
+    _11,
+    _12,
+    _13,
+    _14,
+    _15,
+    _16,
+    _17,
+    _18,
+    _19,
+    _20,
+    _21,
+    _22,
+    _23,
+    _24,
+}
 
-// otherwise type id is operator
-// bit 1 is length type
-// 0 = 15 bits are the length of all sub packets
-// 1 = 11 bits are the number of sub
+fn apply_orientation_to_point(o: &O, v: &Vec3) -> Vec3 {
+    let x = v.0;
+    let y = v.1;
+    let z = v.2;
+    match o {
+        O::_1 => (x, y, z),
+        O::_2 => (-z, y, x),
+        O::_3 => (y, -x, z),
+        O::_4 => (y, z, x),
+        O::_5 => (-z, -x, y),
+        O::_6 => (-x, -y, z),
+        O::_7 => (-x, z, y),
+        O::_8 => (-z, -y, -x),
+        O::_9 => (-y, x, z),
+        O::_10 => (-y, z, -x),
+        O::_11 => (-z, x, -y),
+        O::_12 => (x, z, -y),
+        O::_13 => (y, x, -z),
+        O::_14 => (y, -z, -x),
+        O::_15 => (z, x, y),
+        O::_16 => (x, -y, -z),
+        O::_17 => (x, -z, y),
+        O::_18 => (z, -y, x),
+        O::_19 => (-y, -x, -z),
+        O::_20 => (-y, -z, x),
+        O::_21 => (z, -x, -y),
+        O::_22 => (-x, y, -z),
+        O::_23 => (-x, -z, -y),
+        O::_24 => (z, y, -x),
+    }
+}
+
+fn all_rotations_of_point(v: &Vec3) -> [(O, Vec3); 24] {
+    let x = v.0;
+    let y = v.1;
+    let z = v.2;
+    return [
+        (O::_1, (x, y, z)),
+        (O::_2, (-z, y, x)),
+        (O::_3, (y, -x, z)),
+        (O::_4, (y, z, x)),
+        (O::_5, (-z, -x, y)),
+        (O::_6, (-x, -y, z)),
+        (O::_7, (-x, z, y)),
+        (O::_8, (-z, -y, -x)),
+        (O::_9, (-y, x, z)),
+        (O::_10, (-y, z, -x)),
+        (O::_11, (-z, x, -y)),
+        (O::_12, (x, z, -y)),
+        (O::_13, (y, x, -z)),
+        (O::_14, (y, -z, -x)),
+        (O::_15, (z, x, y)),
+        (O::_16, (x, -y, -z)),
+        (O::_17, (x, -z, y)),
+        (O::_18, (z, -y, x)),
+        (O::_19, (-y, -x, -z)),
+        (O::_20, (-y, -z, x)),
+        (O::_21, (z, -x, -y)),
+        (O::_22, (-x, y, -z)),
+        (O::_23, (-x, -z, -y)),
+        (O::_24, (z, y, -x)),
+    ];
+}
+
+type Vec3 = (i64, i64, i64);
+
+struct Sensor {
+    raw_readings: Vec<Vec3>,
+    relative_beacon_coords_per_beacon_per_o: HashMap<usize, Vec<(O, Vec<Delta>)>>,
+}
 
 struct Problem {
-    nums: Vec<Num>,
+    sensors: Vec<Sensor>,
 }
 
-#[derive(Debug, Clone)]
-enum Num {
-    Value(i32),
-    Pair((Box<Num>, Box<Num>)),
+#[derive(Debug)]
+struct Delta {
+    raw_reading_index: usize,
+    offset_from_root: Vec3,
+    root_index: usize
 }
 
-enum ReductionResult {
-    AddToLeftRight(i32),
-    AddToLeftRightLater(i32),
-    AddToRightLeft(i32),
-    AddToRightLeftLater(i32),
-    Success,
-}
-
-impl Num {
-    fn is_value(&self) -> bool {
-        match self {
-            Num::Value(_) => true,
-            _ => false,
-        }
-    }
-    fn unwrap_value(&self) -> i32 {
-        match self {
-            Num::Value(v) => v.clone(),
-            _ => {
-                println!("{:?}", self);
-                panic!("Unwrapped non-value Num!")
-            }
-        }
-    }
-    fn is_pair(&self) -> bool {
-        match self {
-            Num::Pair(_) => true,
-            _ => false,
-        }
-    }
-    fn unwrap_pair(&self) -> (&Num, &Num) {
-        match self {
-            Num::Pair(tuple) => (&tuple.0, &tuple.1),
-            _ => panic!("Unwrapped non-pair Num!"),
-        }
-    }
-    fn both_values(&self) -> bool {
-        match self {
-            Num::Pair(tuple) => tuple.0.is_value() && tuple.1.is_value(),
-            _ => false,
-        }
-    }
-    // fn unwrap_pair_mut(&mut self) -> (&mut Num, &mut Num) {
-    //     match self {
-    //         Num::Pair(tuple) => (tuple.0.as_mut(), tuple.1.as_mut()),
-    //         _ => panic!("Unwrapped non-pair Num!"),
-    //     }
-    // }
-    fn next_right_value(i: &mut usize, s: &str) -> Num {
-        let slice_range = (*i)..(*i) + 1;
-        let c = &s[slice_range];
-        // always consumes a char
-        if c == "[" {
-            Num::from_string(i, s)
-        } else {
-            *i += 1;
-            let v: i32 = c
-                .parse()
-                .map_err(|e| {
-                    println!("{} -> {}", c, e);
-                    e
-                })
-                .unwrap();
-            Num::Value(v)
-        }
-    }
-    fn next_left_value(i: &mut usize, s: &str) -> Num {
-        let slice_range = (*i)..(*i) + 1;
-        let c = &s[slice_range];
-        if c == "[" {
-            Num::from_string(i, s)
-        } else {
-            *i += 1;
-            let v: i32 = c.parse().unwrap();
-            Num::Value(v)
-        }
-    }
-    fn from_string(i: &mut usize, s: &str) -> Num {
-        let slice_range = (*i)..(*i) + 1;
-        let c = &s[slice_range];
-        if c == "[" {
-            *i += 1; // move past [
-            let left = Num::next_left_value(i, s);
-            *i += 1; // move past ,
-            let right = Num::next_right_value(i, s);
-            *i += 1; // move past ]
-            Num::Pair((Box::new(left), Box::new(right)))
-        } else {
-            panic!("Cannot parse string not starting with [")
-        }
-    }
-    fn add_to_left_most_value(&mut self, v: i32) {
-        let mut cur = self;
-        loop {
-            match cur {
-                Num::Pair((left, _)) => {
-                    cur = left.as_mut();
-                }
-                Num::Value(value) => {
-                    // println!("{} + {}", *value, v);
-                    *cur = Num::Value(*value + v);
-                    break;
-                }
-            };
-        }
-    }
-    fn apply_split(v: i32) -> Num {
-        if v < 10 {
-            Num::Value(v)
-        } else {
-            // println!("Split {}", v);
-            let div_2: f32 = v as f32 / 2.0f32;
-            let left_div_2_floor = div_2.floor() as i32;
-            let right_div_2_ceil = div_2.ceil() as i32;
-            Num::Pair((
-                Box::new(Num::Value(left_div_2_floor)),
-                Box::new(Num::Value(right_div_2_ceil)),
-            ))
-        }
-    }
-    fn add_to_right_most_value(&mut self, v: i32) {
-        let mut cur = self;
-        loop {
-            match cur {
-                Num::Pair((_, right)) => {
-                    cur = right.as_mut();
-                }
-                Num::Value(value) => {
-                    // println!("{} + {}", *value, v);
-                    *cur = Num::Value(*value + v);
-                    break;
-                }
-            };
-        }
-    }
-    fn is_sploding_pair(&self, depth: usize) -> bool {
-        self.is_pair() && self.both_values() && depth >= 4
-    }
-    fn splode_recurse<'a, 'b>(&'a mut self, depth: usize) -> Option<ReductionResult>
-    where
-        'a: 'b,
-    {
-        if self.is_value() {
-            return None;
-        } else if let Num::Pair((left, right)) = self {
-            // self with right-hand pair ready to explode
-            // need to mutate self.right to be 0
-            // need to add self.right.right to...
-            //   first parent where this descent was the left-hand
-            //   parent.left-most-pair.left
-            // need to add self.right.left to self.left.right-most-pair.right
-            //
-            // self with left-hand pair ready to explode
-            // need to mutate self.left to be 0
-            // need to add self.left.right to self.right.left-most-pair.left
-            // need to add self.left.left to...
-            //   first parent where this descent was the right-hand
-            //   parent.left-most-pair.right
-            if left.is_sploding_pair(depth + 1) {
-                let left_pair = left.unwrap_pair();
-                let lefts_right_value = left_pair.1.unwrap_value();
-                let lefts_left_value = left_pair.0.unwrap_value();
-                right.add_to_left_most_value(lefts_right_value);
-                *left = Box::new(Num::Value(0));
-                // reverse delegate: lefts left value
-                Some(ReductionResult::AddToLeftRight(lefts_left_value))
-            } else if right.is_sploding_pair(depth + 1) {
-                let right_pair = right.unwrap_pair();
-                let rights_right_value = right_pair.1.unwrap_value();
-                let rights_left_value = right_pair.0.unwrap_value();
-                left.add_to_right_most_value(rights_left_value);
-                *right = Box::new(Num::Value(0));
-                // reverse delegate: rights right value
-                Some(ReductionResult::AddToRightLeft(rights_right_value))
-            } else {
-                let s1 = left.splode_recurse(depth + 1);
-                if s1.is_some() {
-                    return match s1.unwrap() {
-                        ReductionResult::AddToLeftRight(v) => {
-                            Some(ReductionResult::AddToLeftRight(v))
-                        },
-                        ReductionResult::AddToLeftRightLater(v) => {
-                            Some(ReductionResult::AddToLeftRight(v))
-                        },
-                        ReductionResult::AddToRightLeft(v) => {
-                            right.add_to_left_most_value(v.clone());
-                            Some(ReductionResult::Success)
-                        },
-                        ReductionResult::AddToRightLeftLater(v) => {
-                            Some(ReductionResult::AddToRightLeft(v))
-                        },
-                        success => Some(success),
-                    }
-                }
-                let s2 = right.splode_recurse(depth + 1);
-                if s2.is_some() {
-                    return match s2.unwrap() {
-                        ReductionResult::AddToLeftRight(v) => {
-                            left.add_to_right_most_value(v);
-                            Some(ReductionResult::Success)
-                        },
-                        ReductionResult::AddToLeftRightLater(v) => {
-                            Some(ReductionResult::AddToLeftRight(v))
-                        },
-                        ReductionResult::AddToRightLeft(v) => {
-                            Some(ReductionResult::AddToRightLeft(v))
-                        },
-                        ReductionResult::AddToRightLeftLater(v) => {
-                            Some(ReductionResult::AddToRightLeft(v))
-                        },
-                        success => Some(success),
-                    }
-                }
-                None
-            }
-        } else {
-            None
-        }
-    }
-    fn apply_splits(&mut self) -> bool {
-        match self {
-            Num::Value(v) => {
-                if *v < 10 {
-                    false
-                } else {
-                    *self = Num::apply_split(v.clone());
-                    true
-                }
-            }
-            Num::Pair(pair) => {
-                let l = pair.0.apply_splits();
-                if l {
-                    l
-                } else {
-                    pair.1.apply_splits()
-                }
-            }
-        }
-    }
-    fn reduce(&mut self) -> bool {
-        // let mut siblings: Vec<Descent> = vec![];
-        let mut some_action = false;
-        // println!("start {}", self.to_string_with_depth(0));
-        loop {
-            let mut this_iter_some_action = false;
-            while self.splode_recurse(0).is_some() {
-                // println!("      {}", self.to_string_with_depth(0));
-                this_iter_some_action = true;
-            }
-            if self.apply_splits() {
-                // println!("split");
-                this_iter_some_action = true
-            }
-            some_action = some_action || this_iter_some_action;
-            if !this_iter_some_action {
-                return some_action;
-            }
-        }
-    }
-    fn get_magnitude(&self) -> i64 {
-        match self {
-            Num::Value(v) => v.clone() as i64,
-            Num::Pair((left, right)) => {
-                left.get_magnitude() * 3 + right.get_magnitude() * 2
-            },
-        }
-    }
-    fn to_string(&self) -> String {
-        let mut s = "".to_string();
-        match self {
-            Num::Value(v) => s += &format!("{}", v),
-            Num::Pair((l, r)) => {
-                s += "";
-                s += &l.to_string();
-                s += ",";
-                s += &r.to_string();
-                s += "]";
-            }
-        }
-        s
-    }
-    fn to_string_with_depth(&self, depth: usize) -> String {
-        let mut s = "".to_string();
-        match self {
-            Num::Value(v) => s += &format!("{}", v),
-            Num::Pair((l, r)) => {
-                s += &format!("[{}d ", depth);
-                s += &l.to_string_with_depth(depth + 1);
-                s += ",";
-                s += &r.to_string_with_depth(depth + 1);
-                s += "]";
-            }
-        }
-        s
-    }
-    fn add(&self, rhs: &Num) -> Num {
-        Num::Pair((Box::new(self.clone()), Box::new(rhs.clone())))
-    }
-    // fn reduce(&self) -> Num {
-
-    // }
+fn add_vec3s(a: &Vec3, b: &Vec3) -> Vec3 {
+    (a.0 + b.0, a.1 + b.1, a.2 + b.2)
 }
 
 impl Problem {
@@ -330,55 +122,240 @@ impl Problem {
             .split("\n")
             .map(|line| line.trim().to_string())
             .collect();
-        let nums = lines
-            .iter()
-            .map(|l| {
-                let mut i = 0;
-                let n = Num::from_string(&mut i, l.trim());
-                // println!("{:?}", n);
-                n
-            })
-            .collect();
-        Ok(Problem { nums })
+        let mut idx = 0;
+        let mut sensors = vec![];
+        loop {
+            if lines[idx].contains("scanner") {
+                idx += 1;
+                let mut coords = vec![];
+                while idx < lines.len() && lines[idx].trim().len() > 0 {
+                    let line_split: Vec<&str> = lines[idx].trim().split(",").collect();
+                    let x: i64 = line_split[0].parse().unwrap();
+                    let y: i64 = line_split[1].parse().unwrap();
+                    let z: i64 = line_split[2].parse().unwrap();
+                    coords.push((x, y, z));
+                    idx += 1;
+                }
+                if coords.len() > 0 {
+                    println!("Sensor {} -> read {} beacons", sensors.len(), coords.len());
+                    sensors.push(Sensor {
+                        relative_beacon_coords_per_beacon_per_o: Problem::fingerprint_readings(
+                            &coords,
+                        ),
+                        raw_readings: coords,
+                    });
+                    idx += 1; // advance past empty line
+                }
+            } else {
+                idx += 1;
+            }
+            if idx >= lines.len() {
+                break;
+            }
+        }
+        println!("Read {} sensor readings", sensors.len());
+        Ok(Problem { sensors })
+    }
+
+    fn fingerprint_readings(
+        readings: &Vec<(i64, i64, i64)>,
+    ) -> HashMap<usize, Vec<(O, Vec<Delta>)>> {
+        let mut fingerprints = HashMap::new();
+        for (root_beacon_idx, root_beacon) in readings.iter().enumerate() {
+            let all_orientations_of_root = all_rotations_of_point(root_beacon);
+            let mut deltas: Vec<(O, Vec<Delta>)> = vec![];
+            for (o, point) in all_orientations_of_root {
+                let mut relative_other_beacons: Vec<Delta> = vec![];
+                for (other_beacon_idx, other_beacon) in readings
+                    .iter()
+                    .map(|b| apply_orientation_to_point(&o, b))
+                    .enumerate()
+                {
+                    let offset = (
+                        other_beacon.0 - point.0,
+                        other_beacon.1 - point.1,
+                        other_beacon.2 - point.2,
+                    );
+                    relative_other_beacons.push(Delta {
+                        offset_from_root: offset,
+                        raw_reading_index: other_beacon_idx,
+                        root_index: root_beacon_idx
+                    })
+                }
+                deltas.push((o, relative_other_beacons))
+            }
+            fingerprints.insert(root_beacon_idx, deltas);
+        }
+        fingerprints
+    }
+    // fn memoize_intersection_by_dist<'b>(
+    //     &self,
+    //     lhs: usize,
+    //     rhs: usize,
+    //     memo: &'b mut HashMap<(usize, usize), BeaconIntersection>,
+    // ) {
+    //     if !memo.contains_key(&(lhs, rhs)) {
+    //         let left = &self.sensors[lhs];
+    //         let right = &self.sensors[rhs];
+    //         let dist_based_beacon_intersection = left.detect_beacon_intersection_by_dist(right);
+    //         memo.insert((lhs, rhs), dist_based_beacon_intersection);
+    //     }
+    // }
+
+    fn detect_nearby_sensors<'b>(
+        &self,
+        cur_sensor_idx: usize,
+        cur_orientation: &O
+    ) -> Vec<(usize, BeaconBasedOrientation)> {
+        let cur_sensor = &self.sensors[cur_sensor_idx];
+        let mut nearby_sensors: Vec<(usize, BeaconBasedOrientation)> = vec![];
+        for sensor_idx in 0..self.sensors.len() {
+            if cur_sensor_idx != sensor_idx {
+                let detection = cur_sensor.detect_orientation(&self.sensors[sensor_idx], cur_orientation);
+                if detection.is_some() {
+                    let orientation = detection.unwrap();
+                     nearby_sensors.push((sensor_idx, orientation));
+                 }
+            };
+        }
+        nearby_sensors
+    }
+
+    fn align_sensors(&self) {
+        // sensor zero is always located at 0,0, and oriented "correctly"
+        let mut observed = HashSet::new();
+        let mut stack: Vec<(usize, Vec3, O)> = vec![
+            (0usize /* sensor idx */, (0,0,0), O::_1 /* orientation */)
+        ];
+        observed.insert(0);
+        let mut true_beacon_positions: HashSet<Vec3> = HashSet::new();
+        for beacon in &self.sensors[0].raw_readings {
+            true_beacon_positions.insert(*beacon);
+        }
+        let mut scanner_positions: Vec<Vec3> = vec![(0,0,0)];
+        while stack.len() > 0 {
+            let (cur_sensor_idx, cur_sensor_pos, cur_sensor_orientation) = stack.pop().unwrap();
+            let next_detections = self.detect_nearby_sensors(cur_sensor_idx, &cur_sensor_orientation);
+            for (sensor_idx, det) in next_detections {
+                if !observed.contains(&sensor_idx) {
+                    observed.insert(sensor_idx);
+                    // println!("[A] Detected sensor {} at {:?} relative to {}", sensor_idx, det.norm_sensor_pos, cur_sensor_idx);
+                    let sensor_position = add_vec3s(&cur_sensor_pos, &det.norm_sensor_pos); 
+                    scanner_positions.push(sensor_position);
+                    println!("Detected sensor {} at {:?} relative to {}", sensor_idx, sensor_position, cur_sensor_idx);
+                    for beacon in det.norm_positions {
+                        // println!("{:?}",reoriented_beacon);
+                        true_beacon_positions.insert(add_vec3s(&cur_sensor_pos, &beacon));
+                    }
+                    stack.push((sensor_idx, sensor_position, det.orientation));
+                }
+            }
+        }
+        println!("--");
+        // for b in &true_beacon_positions {
+        //     println!("{},{},{}", b.0, b.1, b.2);
+        // }
+        println!("Num beacons {}", true_beacon_positions.len());
+        let quantify = |v: &Vec3| { v.0 + v.1 + v.2 };
+        let diff = |a: &Vec3, b: &Vec3| { 
+            (a.0 - b.0).abs() +
+            (a.1 - b.1).abs() +
+            (a.2 - b.2).abs()
+        };
+        let mut max = 0;
+        // brute force since by now our brain doesn't work
+        for i in 0..scanner_positions.len() {
+            for j in 0..scanner_positions.len() {
+                let d = diff(&scanner_positions[i], &scanner_positions[j]);
+                if d > max {
+                    max = d;
+                }
+            }
+        }
+        println!("Max sensor distance {}", max);
     }
 }
+
+
+
+struct BeaconBasedOrientation {
+    orientation: O,
+    norm_positions: Vec<Vec3>,
+    norm_sensor_pos: Vec3
+}
+
+ impl Sensor {
+
+    fn detect_orientation(&self, other: &Sensor, cur_orientation: &O) -> Option<BeaconBasedOrientation> {
+        for (lhs_root_beacon_idx, left_per_o_offsets) in &self.relative_beacon_coords_per_beacon_per_o {
+            // do have to try every left hand beacon as base point of reference
+            // but not every orientation, only compare to original orientation
+            let (_, lhs_offsets) = left_per_o_offsets.iter().find(|tup| {
+                tup.0 == *cur_orientation
+            }).unwrap();
+            for (_, right_per_o_offsets) in &other.relative_beacon_coords_per_beacon_per_o {
+                for  (o, rhs_offsets) in right_per_o_offsets {
+                    let mut score = 0;
+                    for rhs_beacon in rhs_offsets {
+                        for lhs_beacon in lhs_offsets {
+                            if lhs_beacon.offset_from_root == rhs_beacon.offset_from_root {
+                                score += 1;
+                                if score >= 12 {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if score >= 12 {
+                        // println!("found {} for orientation {:?}", score, o);
+                        // positions = offset + lhs root pos
+                        // sensor pos = - rhs root pos
+                        // recalculate positions of all beacons now
+                        let rhs_root_beacon_idx = rhs_offsets[0].root_index;
+                        let rhs_root_position: Vec3 = 
+                            apply_orientation_to_point(o, &other.raw_readings[rhs_root_beacon_idx]);
+                        let lhs_root_position: Vec3 =  apply_orientation_to_point(&cur_orientation,&self.raw_readings[*lhs_root_beacon_idx]);
+                        let sensor_pos = 
+                            (
+                                -rhs_root_position.0 + lhs_root_position.0,
+                                -rhs_root_position.1 + lhs_root_position.1,
+                                -rhs_root_position.2 + lhs_root_position.2
+                            );
+                            
+                        return Some(BeaconBasedOrientation {
+                            orientation: *o,
+                            norm_sensor_pos: sensor_pos,
+                            norm_positions: other.raw_readings.iter().map(|d| {
+                                let oriented_pos = apply_orientation_to_point(o, d);
+                                (
+                                    sensor_pos.0 + oriented_pos.0,
+                                    sensor_pos.1 + oriented_pos.1,
+                                    sensor_pos.2 + oriented_pos.2
+                                )
+                            }).collect()
+                        })
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+// axis' to rotate around, can rotate 90 degs, 12 / 3 / 6 / 9 o clock orientations
+// about x
+// about y
+// about z
+// about x,y
+// about y,z
+// about z,x
 
 fn main() {
     let input_res = Problem::from_file("./src/input.txt");
     match input_res {
         Ok(mut input) => {
-            let mut cur = input.nums[0].clone();
-            let mut largest_mag = 0;
-            for n in input.nums.iter().skip(1) {
-                // println!("   {}", cur.to_string());
-                // println!("+  {}", n.to_string());
-                cur = cur.add(n);
-                cur.reduce();
-                // println!("=  {}", cur.to_string());
-                // println!("");
-            }
-            println!("final sum {}", cur.to_string());
-            println!("magnitude {}", cur.get_magnitude());
-            let mut max = 0;
-            for left in 0..input.nums.len() {
-                for right in 0..input.nums.len() {
-                    if left == right {
-                        continue
-                    }
-                    let l = &input.nums[left];
-                    let r = &input.nums[right];
-                    let mut c = l.add(r);
-                    c.reduce();
-                    let mag = c.get_magnitude();
-                    if mag > max {
-                        max = mag 
-                    }
-                }
-            }
-            println!("best mag {}", max);
-            // let packets = input.
-            // let result = packets[0].evaluate();
-            // println!("{:?}", input.nums);
+            input.align_sensors();
+            // 680 is wrong
         }
         Err(e) => println!("{}", e),
     }
